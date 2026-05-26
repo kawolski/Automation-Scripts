@@ -9,7 +9,7 @@ Provides azure login and subscription selection screen.
 3. Provides option to enable EAH for your selected VM list.
 
 # Ghost DB Detector
-## uses powershell 7
+### uses powershell 7
 1. Surfs the selected azure account for SQL Servers
 2. Lists all SQL DBs that are unused for past 30 days
 3. Creates csv output file
