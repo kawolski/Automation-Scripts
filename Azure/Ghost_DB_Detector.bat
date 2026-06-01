@@ -5,11 +5,15 @@ pause
 exit /b
 #>
 
+# --- EVERYTHING BELOW IS PURE POWERSHELL ---
 $Host.UI.RawUI.ForegroundColor = 'DarkYellow'
 $Host.UI.RawUI.BackgroundColor = 'Black'
 Clear-Host
 
 Write-Host ">> GHOST DB DETECTOR <<" -ForegroundColor Yellow
+
+# Your logic
+
 
 # =========================
 # GET AZURE SQL SERVERS
@@ -149,12 +153,15 @@ Write-Host "`nStarting PARALLEL scan..." -ForegroundColor Cyan
 
 $results = $selectedServers | ForEach-Object -Parallel {
 
-    $server = $_
+    
+    $serverName = $_.Name
+    $serverRG   = $_.RG
+
     $out = @()
 
-    Write-Host "`n[Server] $($server.Name)" -ForegroundColor Yellow
+    Write-Host "`n[Server] $serverName" -ForegroundColor Yellow
 
-    $dbs = az sql db list -g $server.RG -s $server.Name | ConvertFrom-Json
+    $dbs = az sql db list -g $serverRG -s $serverName | ConvertFrom-Json
 
     foreach ($db in $dbs) {
 
@@ -206,7 +213,8 @@ $results = $selectedServers | ForEach-Object -Parallel {
         if ($cpuAvg -lt $using:inactiveCpu -and $dtuAvg -lt $using:inactiveDtu) {
 
             $out += [PSCustomObject]@{
-                Server    = $server.Name
+                Server    = $serverName
+                RG        = $serverRG
                 Database  = $db.name
                 AvgCPU30d = [math]::Round($cpuAvg,2)
                 AvgDTU30d = [math]::Round($dtuAvg,2)
@@ -247,3 +255,136 @@ $file = "unused_sql_dbs_$(Get-Date -Format yyyyMMdd_HHmmss).csv"
 $unusedDbs | Export-Csv $file -NoTypeInformation
 
 Write-Host "`nExported: $file" -ForegroundColor Cyan
+
+# ================================================== NEW SECTION =================================================================
+
+# =========================
+# DELETE FLOW
+# =========================
+
+$choice = Read-Host "`nPress 'D' to delete unused DBs, anything else to exit"
+
+if ($choice -ne "D" -and $choice -ne "d") {
+    Write-Host "Exiting..." -ForegroundColor Yellow
+    exit
+}
+
+# =========================
+# BUILD DELETE MENU
+# =========================
+
+$deleteItems = foreach ($db in $unusedDbs) {
+    [PSCustomObject]@{
+        Server   = $db.Server
+        RG       = $db.RG 
+        Database = $db.Database
+        Selected = $false
+        Type     = "db"
+    }
+}
+
+$deleteItems += [PSCustomObject]@{
+    Server   = ""
+    Database = ">> CONFIRM DELETE <<"
+    Selected = $false
+    Type     = "go"
+}
+
+$cursor = 0
+$exit = $false
+
+# =========================
+# DELETE MENU UI
+# =========================
+function RenderDeleteMenu {
+
+    Clear-Host
+    Write-Host "Select databases to DELETE`n" -ForegroundColor Red
+
+    for ($i = 0; $i -lt $deleteItems.Count; $i++) {
+
+        $item = $deleteItems[$i]
+
+        $prefix = if ($i -eq $cursor) { "-> " } else { "   " }
+        $color = if ($i -eq $cursor) { "Yellow" } else { "White" }
+
+        $star = if ($item.Type -eq "db" -and $item.Selected) { "*" } else { "" }
+
+        if ($item.Type -eq "go") {
+            Write-Host "$prefix $($item.Database)" -ForegroundColor Red
+        }
+        else {
+            Write-Host ("{0}{1} {2} {3}" -f $prefix, "$($item.Server) - $($item.Database)", $star, "") -ForegroundColor $color
+        }
+    }
+}
+
+# =========================
+# UI LOOP
+# =========================
+while (-not $exit) {
+
+    RenderDeleteMenu
+
+    $key = [Console]::ReadKey($true)
+
+    switch ($key.Key) {
+
+        "UpArrow"   { if ($cursor -gt 0) { $cursor-- } }
+        "DownArrow" { if ($cursor -lt $deleteItems.Count - 1) { $cursor++ } }
+
+        "Enter" {
+            $current = $deleteItems[$cursor]
+
+            if ($current.Type -eq "go") {
+                $exit = $true
+                break
+            }
+
+            if ($current.Type -eq "db") {
+                $deleteItems[$cursor].Selected = -not $deleteItems[$cursor].Selected
+            }
+        }
+    }
+}
+
+# =========================
+# FINAL DELETE LIST
+# =========================
+$toDelete = $deleteItems | Where-Object { $_.Selected -and $_.Type -eq "db" }
+
+if ($toDelete.Count -eq 0) {
+    Write-Host "`nNo DBs selected. Exiting..." -ForegroundColor Yellow
+    exit
+}
+
+Clear-Host
+Write-Host "`nDatabases selected for deletion:`n" -ForegroundColor Red
+$toDelete | ForEach-Object {
+    Write-Host "$($_.Server) [$($_.RG)] - $($_.Database)"
+}
+
+$confirm = Read-Host "`nType YES to permanently delete"
+
+if ($confirm -ne "YES") {
+    Write-Host "Cancelled." -ForegroundColor Yellow
+    exit
+}
+
+# =========================
+# DELETE EXECUTION
+# =========================
+Write-Host "`nDeleting databases..." -ForegroundColor Red
+
+foreach ($db in $toDelete) {
+
+    Write-Host "Deleting $($db.Database) from $($db.Server)..." -ForegroundColor DarkRed
+
+    az sql db delete `
+    --name $db.Database `
+    --server $db.Server `
+    --resource-group $db.RG `
+    --yes
+}
+
+Write-Host "`nDeletion complete." -ForegroundColor Green
