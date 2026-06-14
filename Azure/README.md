@@ -8,9 +8,11 @@ Provides azure login and subscription selection screen.
 2. Lists all VMs with their EncryptionAtHost status
 3. Provides option to enable EAH for your selected VM list.
 
-# Ghost DB Detector
+# Ghost DB Exterminator
 ### uses powershell 7
 1. Surfs the selected azure account for SQL Servers
 2. Lists all SQL DBs that are unused for past 30 days
 3. Creates csv output file
 4. Parallel server execution: Faster for multiple servers
+5. Uses 30-day average CPU and DTU consumption to identify low-utilization databases.
+6. Provides with delete option, so you don't go manual
