@@ -101,7 +101,9 @@ function Enable-Encryption {
             az vm deallocate --resource-group $vm.RG --name $vm.VM
 
             Write-Host "Enabling EncryptionAtHost for VM: $($vm.VM)..."
-            az vm update --resource-group $vm.RG --name $vm.VM --set securityProfile.encryptionAtHost=true
+            
+			az resource update --resource-group $vm.RG --name $vm.VM --resource-type "Microsoft.Compute/virtualMachines" --set properties.securityProfile.encryptionAtHost=true
+
 
             Write-Host "Starting VM: $($vm.VM)..."
             az vm start --resource-group $vm.RG --name $vm.VM
